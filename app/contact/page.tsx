@@ -465,7 +465,7 @@ export default function ContactPage() {
           <div className="grid grid-cols-1 gap-8 lg:grid-cols-3">
             {/* Map Section */}
             <div className="lg:col-span-2">
-              <div className="group relative overflow-hidden rounded-2xl border border-zinc-200/80 bg-gradient-to-br from-zinc-50 to-zinc-100 shadow-lg shadow-emerald-500/10 transition-all duration-500 hover:shadow-2xl hover:shadow-emerald-500/15">
+              <div className="group relative overflow-hidden rounded-2xl border border-zinc-200/80 bg-linear-to-br from-zinc-50 to-zinc-100 shadow-lg shadow-emerald-500/10 transition-all duration-500 hover:shadow-2xl hover:shadow-emerald-500/15">
                 
                 {/* Blur overlay on load */}
                 <div className="absolute inset-0 bg-linear-to-b from-white/40 to-transparent z-10 pointer-events-none group-hover:opacity-0 transition-opacity duration-500" />

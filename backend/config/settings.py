@@ -96,6 +96,7 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    "core.middleware.security.SecurityHeadersMiddleware",  # Custom security headers
 ]
 
 ROOT_URLCONF = "config.urls"
@@ -193,11 +194,26 @@ REST_FRAMEWORK = {
 }
 
 SIMPLE_JWT = {
-    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=30),
-    "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
-    "ROTATE_REFRESH_TOKENS": False,
-    "BLACKLIST_AFTER_ROTATION": False,
+    # Token lifetimes
+    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=15),  # Short-lived access token
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=7),     # Longer-lived refresh token
+    
+    # Security: Rotate refresh tokens on each use
+    "ROTATE_REFRESH_TOKENS": True,
+    "BLACKLIST_AFTER_ROTATION": True,
+    
+    # Authentication header
     "AUTH_HEADER_TYPES": ("Bearer",),
+    "AUTH_HEADER_NAME": "HTTP_AUTHORIZATION",
+    
+    # Token claims
+    "TOKEN_TYPE_CLAIM": "token_type",
+    "JTI_CLAIM": "jti",
+    
+    # Algorithms
+    "ALGORITHM": "HS256",
+    
+    # Signing key (uses SECRET_KEY by default, which is correct for HS256)
 }
 
 
@@ -232,3 +248,41 @@ ESEWA_STATUS_URL = config(
     "ESEWA_STATUS_URL",
     default="https://rc.esewa.com.np/api/epay/transaction/status/",
 )
+
+
+# ════════════════════════════════════════════════════════════════
+# SECURITY CONFIGURATION (Production-Ready)
+# ════════════════════════════════════════════════════════════════
+
+# HTTPS & Secure Cookies
+if not DEBUG:
+    SECURE_SSL_REDIRECT = True
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_HSTS_SECONDS = 31536000  # 1 year
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
+
+# Security headers (via middleware)
+SECURE_BROWSER_XSS_FILTER = True
+X_FRAME_OPTIONS = "DENY"
+SECURE_CONTENT_SECURITY_POLICY = {
+    "default-src": ("'self'",),
+    "script-src": ("'self'", "cdn.jsdelivr.net"),
+    "style-src": ("'self'", "'unsafe-inline'", "cdn.jsdelivr.net"),
+    "img-src": ("'self'", "data:", "https:"),
+    "font-src": ("'self'", "data:", "cdn.jsdelivr.net"),
+    "connect-src": ("'self'", "https://"),
+}
+
+# Session security
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = "Strict"
+CSRF_COOKIE_HTTPONLY = True
+CSRF_COOKIE_SAMESITE = "Strict"
+
+# JWT Cookie settings (for future use with secure cookies)
+JWT_COOKIE_SECURE = not DEBUG
+JWT_COOKIE_HTTPONLY = True
+JWT_COOKIE_SAMESITE = "Strict"
+
