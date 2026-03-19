@@ -67,28 +67,32 @@ export default function HostelsPage() {
             the streets of Kathmandu.
           </p>
 
-          {/* Stats row */}
-          <div className="mt-8 flex items-center gap-6 sm:gap-10">
-            <div className="text-center">
-              <p className="text-2xl font-bold text-white sm:text-3xl">50+</p>
-              <p className="mt-0.5 text-xs font-medium text-zinc-400 uppercase tracking-wide">
-                Hostels
-              </p>
+          {/* Compact quick-start chips */}
+          <div className="mt-7 flex w-full max-w-2xl flex-wrap items-center justify-center gap-2.5 text-sm">
+            <div className="inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-white/8 px-3 py-1.5 text-[11px] font-semibold tracking-wider text-zinc-200 uppercase backdrop-blur-md sm:text-xs">
+              <Search className="h-3.5 w-3.5 text-emerald-300" /> Popular Right Now
             </div>
-            <div className="h-8 w-px bg-white/15" />
-            <div className="text-center">
-              <p className="text-2xl font-bold text-white sm:text-3xl">10+</p>
-              <p className="mt-0.5 text-xs font-medium text-zinc-400 uppercase tracking-wide">
-                Cities
-              </p>
-            </div>
-            <div className="h-8 w-px bg-white/15" />
-            <div className="text-center">
-              <p className="text-2xl font-bold text-white sm:text-3xl">4.5</p>
-              <p className="mt-0.5 text-xs font-medium text-zinc-400 uppercase tracking-wide">
-                Avg Rating
-              </p>
-            </div>
+
+            <a
+              href="/hostels?city=Pokhara"
+              className="inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-white/8 px-3 py-1.5 font-medium text-zinc-100 backdrop-blur-md transition-all duration-200 hover:border-emerald-300/50 hover:bg-emerald-400/10"
+            >
+              <MapPin className="h-3.5 w-3.5 text-emerald-300" /> Pokhara
+            </a>
+
+            <a
+              href="/hostels?city=Kathmandu"
+              className="inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-white/8 px-3 py-1.5 font-medium text-zinc-100 backdrop-blur-md transition-all duration-200 hover:border-cyan-300/50 hover:bg-cyan-400/10"
+            >
+              <MapPin className="h-3.5 w-3.5 text-cyan-300" /> Kathmandu
+            </a>
+
+            <a
+              href="/hostels?city=Bhaktapur"
+              className="inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-white/8 px-3 py-1.5 font-medium text-zinc-100 backdrop-blur-md transition-all duration-200 hover:border-teal-300/50 hover:bg-teal-400/10"
+            >
+              <MapPin className="h-3.5 w-3.5 text-teal-300" /> Bhaktapur
+            </a>
           </div>
         </div>
 

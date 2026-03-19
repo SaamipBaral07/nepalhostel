@@ -7,13 +7,21 @@ Response conventions
 • Paginated list                     → DRF default: { count, next, previous, results }
 """
 
+import base64
+import hashlib
+import hmac
+import json
 import uuid
+from decimal import Decimal, ROUND_HALF_UP
+from urllib.parse import urlencode
+from urllib.request import urlopen
 
 import stripe
 from django.conf import settings as django_settings
 from django.contrib.auth.tokens import default_token_generator
 from django.core.mail import send_mail
 from django.db.models import Q
+from django.http import HttpResponseRedirect
 from django.template.loader import render_to_string
 from django.utils import timezone
 from django.utils.encoding import force_bytes, force_str
@@ -27,13 +35,17 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 from .models import (
     Booking,
+    ChatbotQA,
+    ChatbotUserQuery,
     City,
     ContactEnquiry,
     Hostel,
     HostelImage,
     Payment,
     Review,
+    SiteSetting,
     SitePage,
+    SocialLink,
     Wishlist,
 )
 from .permissions import IsHost, IsHostOwner
@@ -41,6 +53,9 @@ from .serializers import (
     BookingCreateSerializer,
     BookingSerializer,
     BookingUserSerializer,
+    ChatbotQASerializer,
+    ChatbotUserQueryCreateSerializer,
+    ChatbotUserQuerySerializer,
     CitySerializer,
     ContactEnquirySerializer,
     ForgotPasswordSerializer,
@@ -52,7 +67,9 @@ from .serializers import (
     ResetPasswordSerializer,
     ReviewCreateSerializer,
     ReviewSerializer,
+    SiteSettingSerializer,
     SitePageSerializer,
+    SocialLinkSerializer,
     UserSerializer,
     WishlistSerializer,
     WishlistToggleSerializer,
@@ -387,7 +404,7 @@ class HostelViewSet(viewsets.ViewSet):
     def _resolve_hostel(self, lookup, qs=None):
         """Find a hostel by UUID *or* slug."""
         if qs is None:
-            qs = Hostel.objects.filter(is_active=True)
+            qs = Hostel.objects.filter(is_active=True, is_approved=True)
         try:
             uuid.UUID(str(lookup))
             return qs.get(pk=lookup)
@@ -461,7 +478,7 @@ class HostelViewSet(viewsets.ViewSet):
     def list(self, request):
         """GET /hostels/ — paginated list with optional filters."""
         qs = self._apply_filters(
-            Hostel.objects.filter(is_active=True), request.query_params
+            Hostel.objects.filter(is_active=True, is_approved=True), request.query_params
         )
         from rest_framework.pagination import PageNumberPagination
 
@@ -484,7 +501,7 @@ class HostelViewSet(viewsets.ViewSet):
     @action(detail=False, methods=["get"])
     def featured(self, request):
         """GET /hostels/featured/"""
-        qs = Hostel.objects.filter(is_active=True, is_featured=True)[:8]
+        qs = Hostel.objects.filter(is_active=True, is_approved=True, is_featured=True)[:8]
         serializer = HostelSummarySerializer(
             qs, many=True, context={"request": request}
         )
@@ -494,7 +511,7 @@ class HostelViewSet(viewsets.ViewSet):
     def cities(self, request):
         """GET /hostels/cities/"""
         cities = (
-            Hostel.objects.filter(is_active=True)
+            Hostel.objects.filter(is_active=True, is_approved=True)
             .values_list("city", flat=True)
             .distinct()
             .order_by("city")
@@ -507,7 +524,7 @@ class HostelViewSet(viewsets.ViewSet):
         from django.db.models import JSONField
         
         # Get all hostels with amenities
-        hostels = Hostel.objects.filter(is_active=True).exclude(amenities=[])
+        hostels = Hostel.objects.filter(is_active=True, is_approved=True).exclude(amenities=[])
         
         # Collect all unique amenities
         amenities_set = set()
@@ -542,6 +559,7 @@ class HostelViewSet(viewsets.ViewSet):
 
         qs = Hostel.objects.filter(
             is_active=True,
+            is_approved=True,
             latitude__isnull=False,
             longitude__isnull=False,
         )
@@ -780,7 +798,11 @@ class BookingViewSet(viewsets.ViewSet):
 
     def list(self, request):
         """GET /bookings/ — current user's bookings (paginated)."""
-        qs = Booking.objects.filter(user=request.user)
+        qs = (
+            Booking.objects.filter(user=request.user)
+            .exclude(status="cancelled")
+            .exclude(payment_status="unpaid")
+        )
         from rest_framework.pagination import PageNumberPagination
 
         paginator = PageNumberPagination()
@@ -892,6 +914,59 @@ class BookingViewSet(viewsets.ViewSet):
 stripe.api_key = django_settings.STRIPE_SECRET_KEY
 
 
+def _resolve_stripe_amount(amount_npr: Decimal) -> tuple[str, int]:
+    """Convert NPR booking amount into USD cents for Stripe checkout."""
+
+    npr_per_usd = Decimal(str(getattr(django_settings, "STRIPE_NPR_PER_USD", 147.28)))
+    if npr_per_usd <= 0:
+        npr_per_usd = Decimal("147.28")
+    usd_amount = (amount_npr / npr_per_usd).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    return "usd", int((usd_amount * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+
+
+def _mark_payment_completed(payment: Payment, transaction_id: str):
+    """Finalize payment and sync booking payment status."""
+    if payment.status != "completed":
+        payment.status = "completed"
+        payment.paid_at = timezone.now()
+    payment.transaction_id = transaction_id or payment.transaction_id
+    payment.save()
+
+    booking = payment.booking
+    booking.payment_status = (
+        "fully_paid" if payment.amount >= booking.total_amount else "advance_paid"
+    )
+    booking.save()
+
+
+def _esewa_signature(message: str, secret_key: str) -> str:
+    digest = hmac.new(
+        secret_key.encode("utf-8"),
+        message.encode("utf-8"),
+        hashlib.sha256,
+    ).digest()
+    return base64.b64encode(digest).decode("utf-8")
+
+
+def _esewa_verify_status(product_code: str, total_amount: str, transaction_uuid: str) -> bool:
+    """Confirm transaction completion with eSewa status API."""
+    status_url = getattr(django_settings, "ESEWA_STATUS_URL", "").strip()
+    if not status_url:
+        return False
+
+    query = urlencode(
+        {
+            "product_code": product_code,
+            "total_amount": total_amount,
+            "transaction_uuid": transaction_uuid,
+        }
+    )
+    url = f"{status_url}?{query}"
+    with urlopen(url, timeout=15) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+    return str(payload.get("status", "")).upper() == "COMPLETE"
+
+
 @api_view(["POST"])
 @permission_classes([permissions.IsAuthenticated])
 def create_checkout_session(request, pk):
@@ -914,6 +989,10 @@ def create_checkout_session(request, pk):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
+    stripe_currency, stripe_unit_amount = _resolve_stripe_amount(payment.amount)
+    payment.method = "stripe"
+    payment.save(update_fields=["method"])
+
     frontend_url = django_settings.FRONTEND_URL
 
     try:
@@ -922,7 +1001,7 @@ def create_checkout_session(request, pk):
             line_items=[
                 {
                     "price_data": {
-                        "currency": "npr",
+                        "currency": stripe_currency,
                         "product_data": {
                             "name": f"Booking — {booking.hostel.name}",
                             "description": (
@@ -930,7 +1009,7 @@ def create_checkout_session(request, pk):
                                 f"{booking.check_in} → {booking.check_out}"
                             ),
                         },
-                        "unit_amount": int(payment.amount * 100),  # paisa
+                        "unit_amount": stripe_unit_amount,
                     },
                     "quantity": 1,
                 }
@@ -944,6 +1023,7 @@ def create_checkout_session(request, pk):
             metadata={
                 "booking_id": str(booking.id),
                 "payment_id": str(payment.id),
+                "currency": stripe_currency,
             },
         )
     except stripe.error.StripeError as e:
@@ -984,19 +1064,7 @@ def stripe_webhook(request):
         if payment_id:
             try:
                 payment = Payment.objects.get(pk=payment_id)
-                payment.status = "completed"
-                payment.transaction_id = session.get("payment_intent", "")
-                payment.paid_at = timezone.now()
-                payment.save()
-
-                # Update booking payment status
-                booking = payment.booking
-                booking.payment_status = (
-                    "fully_paid"
-                    if payment.amount >= booking.total_amount
-                    else "advance_paid"
-                )
-                booking.save()
+                _mark_payment_completed(payment, session.get("payment_intent", ""))
             except Payment.DoesNotExist:
                 pass
 
@@ -1005,16 +1073,139 @@ def stripe_webhook(request):
 
 @api_view(["POST"])
 @permission_classes([permissions.IsAuthenticated])
-def esewa_placeholder(request, pk):
-    """POST /payments/<booking_uuid>/esewa/ — eSewa placeholder."""
+def create_esewa_payment(request, pk):
+    """POST /payments/<booking_uuid>/esewa/ — create signed eSewa form payload."""
     try:
-        Booking.objects.get(pk=pk, user=request.user)
+        booking = Booking.objects.get(pk=pk, user=request.user)
     except Booking.DoesNotExist:
         raise NotFound("Booking not found.")
 
+    if booking.payment_status == "fully_paid":
+        return Response(
+            {"message": "This booking is already fully paid."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    payment = booking.payments.filter(status="pending").first()
+    if not payment:
+        return Response(
+            {"message": "No pending payment found for this booking."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    product_code = getattr(django_settings, "ESEWA_PRODUCT_CODE", "").strip()
+    secret_key = getattr(django_settings, "ESEWA_SECRET_KEY", "").strip()
+    form_url = getattr(django_settings, "ESEWA_FORM_URL", "").strip()
+    if not product_code or not secret_key or not form_url:
+        return Response(
+            {"message": "eSewa is not configured. Please contact support."},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+    total_amount = str(payment.amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+    transaction_uuid = f"{booking.id}-{uuid.uuid4().hex[:8]}"
+    signed_field_names = "total_amount,transaction_uuid,product_code"
+    message = (
+        f"total_amount={total_amount},"
+        f"transaction_uuid={transaction_uuid},"
+        f"product_code={product_code}"
+    )
+    signature = _esewa_signature(message, secret_key)
+
+    payment.method = "esewa"
+    payment.transaction_id = transaction_uuid
+    payment.save(update_fields=["method", "transaction_id"])
+
+    success_url = request.build_absolute_uri("/api/v1/payments/esewa/success/")
+    failure_url = (
+        f"{django_settings.FRONTEND_URL}/checkout/cancel"
+        f"?booking_id={booking.id}&gateway=esewa"
+    )
+
     return api_response(
-        {"message": "eSewa integration coming soon. Please use Stripe for now."},
-        message="eSewa not yet available.",
+        {
+            "formUrl": form_url,
+            "formData": {
+                "amount": total_amount,
+                "tax_amount": "0",
+                "total_amount": total_amount,
+                "transaction_uuid": transaction_uuid,
+                "product_code": product_code,
+                "product_service_charge": "0",
+                "product_delivery_charge": "0",
+                "success_url": success_url,
+                "failure_url": failure_url,
+                "signed_field_names": signed_field_names,
+                "signature": signature,
+            },
+        }
+    )
+
+
+@api_view(["GET"])
+@permission_classes([permissions.AllowAny])
+def esewa_success(request):
+    """GET /payments/esewa/success/ — verify eSewa response and redirect frontend."""
+    frontend_url = getattr(django_settings, "FRONTEND_URL", "http://localhost:3000")
+    fallback_redirect = f"{frontend_url}/checkout/cancel?gateway=esewa"
+
+    encoded_data = request.query_params.get("data")
+    if not encoded_data:
+        return HttpResponseRedirect(fallback_redirect)
+
+    try:
+        padded = encoded_data + "=" * (-len(encoded_data) % 4)
+        decoded_data = base64.b64decode(padded).decode("utf-8")
+        esewa_payload = json.loads(decoded_data)
+    except (ValueError, json.JSONDecodeError):
+        return HttpResponseRedirect(fallback_redirect)
+
+    transaction_uuid = str(esewa_payload.get("transaction_uuid", "")).strip()
+    total_amount = str(esewa_payload.get("total_amount", "")).strip()
+    product_code = str(esewa_payload.get("product_code", "")).strip()
+    status_text = str(esewa_payload.get("status", "")).upper()
+    signed_field_names = str(esewa_payload.get("signed_field_names", "")).strip()
+    received_signature = str(esewa_payload.get("signature", "")).strip()
+
+    if not transaction_uuid or not total_amount or not product_code:
+        return HttpResponseRedirect(fallback_redirect)
+
+    secret_key = getattr(django_settings, "ESEWA_SECRET_KEY", "").strip()
+    if secret_key and signed_field_names and received_signature:
+        fields = [name.strip() for name in signed_field_names.split(",") if name.strip()]
+        verification_message = ",".join(
+            f"{field}={esewa_payload.get(field, '')}" for field in fields
+        )
+        expected_signature = _esewa_signature(verification_message, secret_key)
+        if not hmac.compare_digest(expected_signature, received_signature):
+            return HttpResponseRedirect(fallback_redirect)
+
+    try:
+        payment = Payment.objects.select_related("booking").get(
+            transaction_id=transaction_uuid,
+            method="esewa",
+            status="pending",
+        )
+    except Payment.DoesNotExist:
+        return HttpResponseRedirect(fallback_redirect)
+
+    booking_id = payment.booking.id
+    failed_redirect = f"{frontend_url}/checkout/cancel?booking_id={booking_id}&gateway=esewa"
+
+    if status_text != "COMPLETE":
+        return HttpResponseRedirect(failed_redirect)
+
+    try:
+        is_valid = _esewa_verify_status(product_code, total_amount, transaction_uuid)
+    except Exception:
+        return HttpResponseRedirect(failed_redirect)
+
+    if not is_valid:
+        return HttpResponseRedirect(failed_redirect)
+
+    _mark_payment_completed(payment, transaction_uuid)
+    return HttpResponseRedirect(
+        f"{frontend_url}/checkout/success?booking_id={booking_id}&gateway=esewa"
     )
 
 
@@ -1122,3 +1313,115 @@ class SitePageDetailView(generics.RetrieveAPIView):
         instance = self.get_object()
         serializer = self.get_serializer(instance)
         return api_response(serializer.data)
+
+
+class SiteSettingListView(generics.ListAPIView):
+    """GET /site-settings/ — public active key/value settings."""
+
+    permission_classes = [permissions.AllowAny]
+    serializer_class = SiteSettingSerializer
+    pagination_class = None
+
+    def get_queryset(self):
+        return SiteSetting.objects.filter(is_active=True)
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.get_queryset()
+        serializer = self.get_serializer(queryset, many=True)
+        settings_map = {
+            item["key"]: item["value"] for item in serializer.data
+        }
+        return api_response(settings_map)
+
+
+# ═══════════════════════════════════════════════════════
+# Social Links
+# ═══════════════════════════════════════════════════════
+
+
+class SocialLinkListView(generics.ListAPIView):
+    """GET /social-links/ — public list of active social media links."""
+
+    permission_classes = [permissions.AllowAny]
+    serializer_class = SocialLinkSerializer
+    pagination_class = None
+
+    def get_queryset(self):
+        return SocialLink.objects.filter(is_active=True)
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.get_queryset()
+        serializer = self.get_serializer(queryset, many=True)
+        return api_response(serializer.data)
+
+
+# ═══════════════════════════════════════════════════════
+# Chatbot Q&A
+# ═══════════════════════════════════════════════════════
+
+
+class ChatbotQAListView(generics.ListAPIView):
+    """GET /chatbot/questions/ — public list of active chatbot Q&As."""
+
+    permission_classes = [permissions.AllowAny]
+    serializer_class = ChatbotQASerializer
+    pagination_class = None
+
+    def get_queryset(self):
+        return ChatbotQA.objects.filter(is_active=True)
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.get_queryset()
+        serializer = self.get_serializer(queryset, many=True)
+        return api_response(serializer.data)
+
+
+class ChatbotUserQueryCreateView(generics.CreateAPIView):
+    """POST /chatbot/query/ — submit an unsupported query for staff follow-up."""
+
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = ChatbotUserQueryCreateSerializer
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        query = serializer.save()
+        response_data = ChatbotUserQuerySerializer(query).data
+        return api_response(
+            response_data,
+            message="Thanks for your question. Our team will review it and reply here.",
+            status_code=status.HTTP_201_CREATED,
+        )
+
+
+class MyChatbotQueryListView(generics.ListAPIView):
+    """GET /chatbot/my-queries/ — current user's submitted queries and replies."""
+
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = ChatbotUserQuerySerializer
+    pagination_class = None
+
+    def get_queryset(self):
+        qs = ChatbotUserQuery.objects.filter(user=self.request.user).order_by("-created_at")
+        only_replied = self.request.query_params.get("onlyReplied", "").lower()
+        if only_replied in ("1", "true", "yes"):
+            qs = qs.exclude(admin_reply="").filter(reply_seen=False)
+        return qs
+
+    def list(self, request, *args, **kwargs):
+        serializer = self.get_serializer(self.get_queryset(), many=True)
+        return api_response(serializer.data)
+
+
+@api_view(["PATCH"])
+@permission_classes([permissions.IsAuthenticated])
+def mark_chatbot_reply_as_seen(request, pk):
+    """PATCH /chatbot/mark-seen/<uuid>/ — mark a reply as seen."""
+    try:
+        query = ChatbotUserQuery.objects.get(pk=pk, user=request.user)
+    except ChatbotUserQuery.DoesNotExist:
+        raise NotFound("Query not found.")
+
+    query.reply_seen = True
+    query.save()
+    return api_response(ChatbotUserQuerySerializer(query).data)

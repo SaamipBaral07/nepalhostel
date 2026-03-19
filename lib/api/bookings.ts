@@ -35,4 +35,12 @@ export const bookingsApi = {
     api.post<ApiResponse<{ checkoutUrl: string; sessionId: string }>>(
       `/payments/${bookingId}/checkout/`
     ),
+
+  initiateEsewaPayment: (bookingId: string) =>
+    api.post<
+      ApiResponse<{
+        formUrl: string;
+        formData: Record<string, string>;
+      }>
+    >(`/payments/${bookingId}/esewa/`),
 };

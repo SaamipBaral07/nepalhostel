@@ -93,6 +93,7 @@ export interface Hostel {
   host: Pick<User, "id" | "fullName" | "avatarUrl">;
   isFeatured: boolean;
   isActive: boolean;
+  isApproved: boolean;
   createdAt: string;
 }
 
@@ -112,6 +113,7 @@ export type HostelSummary = Pick<
   | "rating"
   | "reviewCount"
   | "isFeatured"
+  | "isApproved"
 > & {
   primaryImage: string;
   distance?: number;
@@ -169,6 +171,8 @@ export interface ApiError {
   errors?: Record<string, string[]>;
   status: number;
 }
+
+export type SiteSettingsMap = Record<string, string>;
 
 // ---- Search / Filters ----
 
@@ -284,6 +288,55 @@ export interface SitePage {
   body: string;
   isActive: boolean;
   sections: SitePageSection[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+// ---- Social Links ----
+
+export type SocialPlatform =
+  | "facebook"
+  | "instagram"
+  | "twitter"
+  | "youtube"
+  | "tiktok"
+  | "linkedin"
+  | "whatsapp"
+  | "viber"
+  | "other";
+
+export interface SocialLink {
+  id: string;
+  platform: SocialPlatform;
+  url: string;
+  label: string;
+  isActive: boolean;
+  ordering: number;
+  createdAt: string;
+}
+
+// ---- Chatbot ----
+
+export interface ChatbotQA {
+  id: string;
+  question: string;
+  answer: string;
+  category: string;
+  isActive: boolean;
+  ordering: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type ChatbotQueryStatus = "pending" | "replied" | "closed";
+
+export interface ChatbotUserQuery {
+  id: string;
+  question: string;
+  status: ChatbotQueryStatus;
+  adminReply: string;
+  repliedAt: string | null;
+  replySeen: boolean;
   createdAt: string;
   updatedAt: string;
 }

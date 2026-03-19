@@ -12,14 +12,18 @@ from rest_framework import serializers
 
 from .models import (
     Booking,
+    ChatbotQA,
+    ChatbotUserQuery,
     City,
     ContactEnquiry,
     Hostel,
     HostelImage,
     Payment,
     Review,
+    SiteSetting,
     SitePage,
     SitePageSection,
+    SocialLink,
     User,
     Wishlist,
 )
@@ -233,6 +237,7 @@ class HostelDetailSerializer(serializers.ModelSerializer):
     host = UserMinSerializer(read_only=True)
     isFeatured = serializers.BooleanField(source="is_featured", read_only=True)
     isActive = serializers.BooleanField(source="is_active", read_only=True)
+    isApproved = serializers.BooleanField(source="is_approved", read_only=True)
     createdAt = serializers.DateTimeField(source="created_at", read_only=True)
 
     class Meta:
@@ -259,6 +264,7 @@ class HostelDetailSerializer(serializers.ModelSerializer):
             "host",
             "isFeatured",
             "isActive",
+            "isApproved",
             "createdAt",
         ]
 
@@ -305,6 +311,9 @@ class HostelSummarySerializer(serializers.ModelSerializer):
     isFeatured = serializers.BooleanField(
         source="is_featured", read_only=True
     )
+    isApproved = serializers.BooleanField(
+        source="is_approved", read_only=True
+    )
     primaryImage = serializers.SerializerMethodField()
 
     class Meta:
@@ -324,6 +333,7 @@ class HostelSummarySerializer(serializers.ModelSerializer):
             "rating",
             "reviewCount",
             "isFeatured",
+            "isApproved",
             "primaryImage",
         ]
 
@@ -551,3 +561,90 @@ class SitePageSerializer(serializers.ModelSerializer):
         return SitePageSectionSerializer(
             sections, many=True, context=self.context
         ).data
+
+
+# ═══════════════════════════════════════════════════════════════
+# Social Link serializers
+# ═══════════════════════════════════════════════════════════════
+
+
+class SocialLinkSerializer(serializers.ModelSerializer):
+    isActive = serializers.BooleanField(source="is_active", read_only=True)
+    createdAt = serializers.DateTimeField(source="created_at", read_only=True)
+
+    class Meta:
+        model = SocialLink
+        fields = ["id", "platform", "url", "label", "isActive", "ordering", "createdAt"]
+
+
+class SiteSettingSerializer(serializers.ModelSerializer):
+    isActive = serializers.BooleanField(source="is_active", read_only=True)
+    createdAt = serializers.DateTimeField(source="created_at", read_only=True)
+    updatedAt = serializers.DateTimeField(source="updated_at", read_only=True)
+
+    class Meta:
+        model = SiteSetting
+        fields = [
+            "key",
+            "value",
+            "category",
+            "description",
+            "ordering",
+            "isActive",
+            "createdAt",
+            "updatedAt",
+        ]
+
+
+# ═══════════════════════════════════════════════════════════════
+# Chatbot Q&A serializers
+# ═══════════════════════════════════════════════════════════════
+
+
+class ChatbotQASerializer(serializers.ModelSerializer):
+    isActive = serializers.BooleanField(source="is_active", read_only=True)
+    createdAt = serializers.DateTimeField(source="created_at", read_only=True)
+    updatedAt = serializers.DateTimeField(source="updated_at", read_only=True)
+
+    class Meta:
+        model = ChatbotQA
+        fields = ["id", "question", "answer", "category", "isActive", "ordering", "createdAt", "updatedAt"]
+
+
+class ChatbotUserQuerySerializer(serializers.ModelSerializer):
+    adminReply = serializers.CharField(source="admin_reply", read_only=True)
+    repliedAt = serializers.DateTimeField(source="replied_at", read_only=True)
+    replySeen = serializers.BooleanField(source="reply_seen", read_only=True)
+    createdAt = serializers.DateTimeField(source="created_at", read_only=True)
+    updatedAt = serializers.DateTimeField(source="updated_at", read_only=True)
+
+    class Meta:
+        model = ChatbotUserQuery
+        fields = [
+            "id",
+            "question",
+            "status",
+            "adminReply",
+            "repliedAt",
+            "replySeen",
+            "createdAt",
+            "updatedAt",
+        ]
+
+
+class ChatbotUserQueryCreateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ChatbotUserQuery
+        fields = ["question"]
+
+    def validate_question(self, value):
+        question = value.strip()
+        if len(question) < 3:
+            raise serializers.ValidationError("Question is too short.")
+        return question
+
+    def create(self, validated_data):
+        return ChatbotUserQuery.objects.create(
+            user=self.context["request"].user,
+            question=validated_data["question"],
+        )

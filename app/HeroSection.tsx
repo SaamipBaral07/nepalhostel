@@ -8,7 +8,27 @@ import { GENDER_CATEGORIES } from "@/lib/constants";
 import { hostelsApi } from "@/lib/api/hostels";
 import type { City } from "@/lib/types";
 
-export function HeroSection() {
+interface HeroSectionProps {
+  badgeText?: string;
+  titleLine1?: string;
+  titleHighlight?: string;
+  description?: string;
+  cityPlaceholder?: string;
+  searchButtonText?: string;
+  quickLabel?: string;
+  quickLabels?: Partial<Record<"boys" | "girls" | "unisex" | "tourist", string>>;
+}
+
+export function HeroSection({
+  badgeText = "Nepal's #1 Hostel Platform",
+  titleLine1 = "Find Your Perfect",
+  titleHighlight = "Hostel in Nepal",
+  description = "Whether you're a student looking for affordable accommodation or a traveler exploring the Himalayas — we've got you covered.",
+  cityPlaceholder = "All Cities",
+  searchButtonText = "Search Hostels",
+  quickLabel = "Quick:",
+  quickLabels,
+}: HeroSectionProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const playPromiseRef = useRef<Promise<void> | null>(null);
   const [isLoaded, setIsLoaded] = useState(false);
@@ -110,7 +130,7 @@ export function HeroSection() {
                 <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-400" />
               </span>
               <span className="text-sm font-semibold text-emerald-300 tracking-wide">
-                Nepal&apos;s #1 Hostel Platform
+                {badgeText}
               </span>
             </div>
 
@@ -121,10 +141,10 @@ export function HeroSection() {
               }`}
               style={{ transitionDelay: "100ms" }}
             >
-              Find Your Perfect
+              {titleLine1}
               <br />
               <span className="bg-linear-to-r from-emerald-400 via-teal-300 to-cyan-400 bg-clip-text text-transparent">
-                Hostel in Nepal
+                {titleHighlight}
               </span>
             </h1>
 
@@ -135,8 +155,7 @@ export function HeroSection() {
               }`}
               style={{ transitionDelay: "200ms" }}
             >
-              Whether you&apos;re a student looking for affordable accommodation
-              or a traveler exploring the Himalayas — we&apos;ve got you covered.
+              {description}
             </p>
 
             {/* Search Bar */}
@@ -157,7 +176,7 @@ export function HeroSection() {
                     className="h-14 w-full rounded-2xl border-0 bg-white/95 pl-12 pr-4 text-base text-zinc-900 shadow-2xl backdrop-blur-sm focus:outline-none focus:ring-2 focus:ring-emerald-400 appearance-none cursor-pointer"
                     defaultValue=""
                   >
-                    <option value="">All Cities</option>
+                    <option value="">{cityPlaceholder}</option>
                     {cities.map((city) => (
                       <option key={city.id} value={city.name}>
                         {city.name}
@@ -171,7 +190,7 @@ export function HeroSection() {
                   className="hero-cta-glow flex h-14 items-center justify-center gap-2.5 rounded-2xl bg-emerald-600 px-8 text-base font-semibold text-white transition-all duration-300 hover:bg-emerald-500 active:scale-[0.98]"
                 >
                   <Search className="h-5 w-5" />
-                  Search Hostels
+                  {searchButtonText}
                 </button>
               </form>
             </div>
@@ -184,7 +203,7 @@ export function HeroSection() {
               style={{ transitionDelay: "440ms" }}
             >
               <span className="text-xs font-medium text-white/40 uppercase tracking-wider mr-1">
-                Quick:
+                {quickLabel}
               </span>
               {GENDER_CATEGORIES.map((cat) => (
                 <Link
@@ -192,7 +211,7 @@ export function HeroSection() {
                   href={`/hostels?gender=${cat.value}`}
                   className="rounded-full border border-white/15 bg-white/5 px-4 py-1.5 text-sm font-medium text-white/80 backdrop-blur-sm transition-all hover:border-emerald-400/40 hover:bg-emerald-500/15 hover:text-white"
                 >
-                  {cat.label}
+                  {quickLabels?.[cat.value as "boys" | "girls" | "unisex" | "tourist"] || cat.label}
                 </Link>
               ))}
             </div>

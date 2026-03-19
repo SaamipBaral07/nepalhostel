@@ -41,7 +41,7 @@ export function Navbar() {
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
 
-const isHome = pathname === "/" || pathname === "/hostels";
+const isHome = pathname === "/" || pathname === "/hostels" || pathname=== "/cities" || pathname=== "/about" || pathname === "/contact"; 
 
   return (
     <>

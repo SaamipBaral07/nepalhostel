@@ -5,6 +5,8 @@ import { AuthProvider } from "@/contexts/AuthContext";
 import { GoogleOAuthWrapper } from "../contexts/GoogleOAuthWrapper";
 import { Navbar } from "@/components/layout/Navbar";
 import { Footer } from "@/components/layout/Footer";
+import { SocialSidebar } from "@/components/widgets/SocialSidebar";
+import { Chatbot } from "@/components/widgets/Chatbot";
 import { APP_NAME, APP_DESCRIPTION } from "@/lib/constants";
 
 const geistSans = Geist({
@@ -41,6 +43,8 @@ export default function RootLayout({
               <Navbar />
               <main className="flex-1">{children}</main>
               <Footer />
+              <SocialSidebar />
+              <Chatbot />
             </div>
           </AuthProvider>
         </GoogleOAuthWrapper>

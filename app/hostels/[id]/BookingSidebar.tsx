@@ -19,11 +19,29 @@ export function BookingSidebar({ hostel }: BookingSidebarProps) {
   const router = useRouter();
 
   const [stayType, setStayType] = useState<"short" | "long">("short");
+  const [paymentMethod, setPaymentMethod] = useState<"stripe" | "esewa">("stripe");
   const [checkIn, setCheckIn] = useState("");
   const [checkOut, setCheckOut] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState(false);
+
+  const submitEsewaForm = (formUrl: string, formData: Record<string, string>) => {
+    const form = document.createElement("form");
+    form.method = "POST";
+    form.action = formUrl;
+
+    Object.entries(formData).forEach(([key, value]) => {
+      const input = document.createElement("input");
+      input.type = "hidden";
+      input.name = key;
+      input.value = value;
+      form.appendChild(input);
+    });
+
+    document.body.appendChild(form);
+    form.submit();
+  };
 
   const handleBook = async () => {
     if (!isAuthenticated) {
@@ -47,16 +65,22 @@ export function BookingSidebar({ hostel }: BookingSidebarProps) {
         checkOut,
       });
 
-      // Redirect to Stripe checkout
       const booking = bookingRes.data;
-      try {
-        const paymentRes = await bookingsApi.createCheckoutSession(booking.id);
-        if (paymentRes.data.checkoutUrl) {
-          window.location.href = paymentRes.data.checkoutUrl;
-          return;
+
+      if (paymentMethod === "stripe") {
+        try {
+          const paymentRes = await bookingsApi.createCheckoutSession(booking.id);
+          if (paymentRes.data.checkoutUrl) {
+            window.location.href = paymentRes.data.checkoutUrl;
+            return;
+          }
+        } catch {
+          // Stripe not configured — keep booking created and show success state
         }
-      } catch {
-        // Stripe not configured — show success anyway
+      } else {
+        const paymentRes = await bookingsApi.initiateEsewaPayment(booking.id);
+        submitEsewaForm(paymentRes.data.formUrl, paymentRes.data.formData);
+        return;
       }
 
       setSuccess(true);
@@ -196,6 +220,43 @@ export function BookingSidebar({ hostel }: BookingSidebarProps) {
                   <span className="font-semibold text-emerald-600">{formatPrice(hostel.pricePerMonth)}/month</span>.
                 </p>
               )}
+            </div>
+
+            <div className="rounded-lg border border-zinc-200 bg-white p-3.5">
+              <p className="mb-2 text-xs font-semibold tracking-wide text-zinc-600 uppercase">
+                Select Payment Method
+              </p>
+              <div className="space-y-2">
+                <label className="flex cursor-pointer items-start gap-2.5 rounded-md border border-zinc-200 px-3 py-2.5 text-sm hover:border-emerald-300 hover:bg-emerald-50/40">
+                  <input
+                    type="radio"
+                    name="paymentMethod"
+                    value="stripe"
+                    checked={paymentMethod === "stripe"}
+                    onChange={() => setPaymentMethod("stripe")}
+                    className="mt-0.5"
+                  />
+                  <div>
+                    <p className="font-medium text-zinc-900">Pay with Stripe 💳</p>
+                    <p className="text-xs text-zinc-500">Host price in NPR is converted to USD for Stripe checkout.</p>
+                  </div>
+                </label>
+
+                <label className="flex cursor-pointer items-start gap-2.5 rounded-md border border-zinc-200 px-3 py-2.5 text-sm hover:border-emerald-300 hover:bg-emerald-50/40">
+                  <input
+                    type="radio"
+                    name="paymentMethod"
+                    value="esewa"
+                    checked={paymentMethod === "esewa"}
+                    onChange={() => setPaymentMethod("esewa")}
+                    className="mt-0.5"
+                  />
+                  <div>
+                    <p className="font-medium text-zinc-900">Pay with eSewa 🇳🇵</p>
+                    <p className="text-xs text-zinc-500">eSewa supports NPR payments only.</p>
+                  </div>
+                </label>
+              </div>
             </div>
 
             {error && (

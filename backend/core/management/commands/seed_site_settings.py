@@ -1,0 +1,297 @@
+from django.core.management.base import BaseCommand
+
+from core.models import SiteSetting
+
+
+DEFAULT_SITE_SETTINGS = [
+    # Home hero
+    ("home.hero.badge", "Nepal's #1 Hostel Platform", "home", "Hero badge text", 10),
+    ("home.hero.title_line_1", "Find Your Perfect", "home", "Hero title first line", 20),
+    ("home.hero.title_line_2", "Hostel in Nepal", "home", "Hero title highlight line", 30),
+    (
+        "home.hero.description",
+        "Whether you're a student looking for affordable accommodation or a traveler exploring the Himalayas — we've got you covered.",
+        "home",
+        "Hero subtitle",
+        40,
+    ),
+    ("home.hero.city_placeholder", "All Cities", "home", "City dropdown placeholder", 50),
+    ("home.hero.search_button", "Search Hostels", "home", "Hero search button text", 60),
+    ("home.hero.quick_label", "Quick:", "home", "Quick filter prefix", 70),
+    ("home.hero.quick_boys", "Boys", "home", "Quick category label", 80),
+    ("home.hero.quick_girls", "Girls", "home", "Quick category label", 90),
+    ("home.hero.quick_unisex", "Unisex", "home", "Quick category label", 100),
+    ("home.hero.quick_tourist", "Tourist", "home", "Quick category label", 110),
+    # Home stats
+    ("home.stats.hostels.value", "500+", "home", "Stat value", 120),
+    ("home.stats.hostels.label", "Hostels Listed", "home", "Stat label", 130),
+    ("home.stats.guests.value", "10K+", "home", "Stat value", 140),
+    ("home.stats.guests.label", "Happy Guests", "home", "Stat label", 150),
+    ("home.stats.cities.value", "25+", "home", "Stat value", 160),
+    ("home.stats.cities.label", "Cities Covered", "home", "Stat label", 170),
+    ("home.stats.rating.value", "4.8★", "home", "Stat value", 180),
+    ("home.stats.rating.label", "Average Rating", "home", "Stat label", 190),
+    # Home sections
+    ("home.featured.badge", "Hand-picked", "home", "Featured section badge", 200),
+    ("home.featured.title", "Featured Hostels", "home", "Featured section title", 210),
+    ("home.featured.subtitle", "Hand-picked accommodations across Nepal", "home", "Featured section subtitle", 220),
+    ("home.featured.view_all", "View all", "home", "Featured desktop CTA", 230),
+    ("home.featured.view_all_mobile", "View all hostels", "home", "Featured mobile CTA", 240),
+    ("home.how.badge", "Simple Process", "home", "How-it-works badge", 250),
+    ("home.how.title", "How It Works", "home", "How-it-works title", 260),
+    ("home.how.subtitle", "Book your hostel in 3 simple steps", "home", "How-it-works subtitle", 270),
+    ("home.how.step1.title", "Search & Filter", "home", "Step 1 title", 280),
+    (
+        "home.how.step1.description",
+        "Browse hostels by city, category, and budget. Find the perfect match for your stay.",
+        "home",
+        "Step 1 description",
+        290,
+    ),
+    ("home.how.step2.title", "Book Instantly", "home", "Step 2 title", 300),
+    (
+        "home.how.step2.description",
+        "Reserve your bed with a simple booking. Short stay or long stay — your choice.",
+        "home",
+        "Step 2 description",
+        310,
+    ),
+    ("home.how.step3.title", "Stay with Confidence", "home", "Step 3 title", 320),
+    (
+        "home.how.step3.description",
+        "Verified listings, real reviews, and secure payments. Your comfort is our priority.",
+        "home",
+        "Step 3 description",
+        330,
+    ),
+    ("home.cta.badge", "For Hostel Owners", "home", "CTA badge", 340),
+    ("home.cta.title_line_1", "Own a Hostel?", "home", "CTA title first line", 350),
+    ("home.cta.title_line_2", "List It for Free", "home", "CTA title second line", 360),
+    (
+        "home.cta.description",
+        "Reach thousands of students and travelers across Nepal. Manage bookings, track payments, and grow your business.",
+        "home",
+        "CTA subtitle",
+        370,
+    ),
+    ("home.cta.primary_button", "Register as Host", "home", "CTA primary button", 380),
+    ("home.cta.secondary_button", "Browse Hostels", "home", "CTA secondary button", 390),
+    # Footer
+    ("footer.top.badge", "For Guests & Hostel Owners", "footer", "Footer top CTA badge", 10),
+    ("footer.top.title", "Need help finding the right stay?", "footer", "Footer top CTA title", 20),
+    (
+        "footer.top.subtitle",
+        "Explore verified hostels, compare amenities, and book confidently in minutes.",
+        "footer",
+        "Footer top CTA subtitle",
+        30,
+    ),
+    ("footer.top.primary.label", "Browse Hostels", "footer", "Footer top primary button label", 40),
+    ("footer.top.primary.url", "/hostels", "footer", "Footer top primary button URL", 50),
+    ("footer.top.secondary.label", "Contact Support", "footer", "Footer top secondary button label", 60),
+    ("footer.top.secondary.url", "/contact", "footer", "Footer top secondary button URL", 70),
+    ("footer.brand.name", "नेपाल Hostel Finder", "footer", "Footer brand name", 80),
+    (
+        "footer.brand.description",
+        "Find and book trusted hostels across Nepal for students, professionals, and travelers.",
+        "footer",
+        "Footer brand description",
+        90,
+    ),
+    ("footer.contact.address", "Kathmandu, Nepal", "footer", "Footer address", 100),
+    ("footer.contact.email", "hello@hostelfinder.np", "footer", "Footer email", 110),
+    ("footer.contact.phone", "+977-9800000000", "footer", "Footer phone", 120),
+    ("footer.links.platform.heading", "Top Cities", "footer", "Footer top-cities heading", 130),
+    ("footer.links.platform.1.label", "Browse Hostels", "footer", "Footer top-cities link label", 131),
+    ("footer.links.platform.1.url", "/hostels", "footer", "Footer top-cities link URL", 132),
+    ("footer.links.platform.2.label", "Hostels in Kathmandu", "footer", "Footer top-cities link label", 133),
+    ("footer.links.platform.2.url", "/hostels?city=Kathmandu", "footer", "Footer top-cities link URL", 134),
+    ("footer.links.platform.3.label", "Hostels in Pokhara", "footer", "Footer top-cities link label", 135),
+    ("footer.links.platform.3.url", "/hostels?city=Pokhara", "footer", "Footer top-cities link URL", 136),
+    ("footer.links.platform.4.label", "Hostels in Lalitpur", "footer", "Footer top-cities link label", 137),
+    ("footer.links.platform.4.url", "/hostels?city=Lalitpur", "footer", "Footer top-cities link URL", 138),
+    ("footer.links.categories.heading", "Categories", "footer", "Footer categories heading", 140),
+    ("footer.links.categories.1.label", "Boys Hostels", "footer", "Footer categories link label", 141),
+    ("footer.links.categories.1.url", "/hostels?gender=boys", "footer", "Footer categories link URL", 142),
+    ("footer.links.categories.2.label", "Girls Hostels", "footer", "Footer categories link label", 143),
+    ("footer.links.categories.2.url", "/hostels?gender=girls", "footer", "Footer categories link URL", 144),
+    ("footer.links.categories.3.label", "Unisex Hostels", "footer", "Footer categories link label", 145),
+    ("footer.links.categories.3.url", "/hostels?gender=unisex", "footer", "Footer categories link URL", 146),
+    ("footer.links.categories.4.label", "Tourist Hostels", "footer", "Footer categories link label", 147),
+    ("footer.links.categories.4.url", "/hostels?gender=tourist", "footer", "Footer categories link URL", 148),
+    ("footer.links.company.heading", "Company", "footer", "Footer company heading", 150),
+    ("footer.links.company.1.label", "About Us", "footer", "Footer company link label", 151),
+    ("footer.links.company.1.url", "/about", "footer", "Footer company link URL", 152),
+    ("footer.links.company.2.label", "Contact", "footer", "Footer company link label", 153),
+    ("footer.links.company.2.url", "/contact", "footer", "Footer company link URL", 154),
+    ("footer.links.company.3.label", "List Your Hostel", "footer", "Footer company link label", 155),
+    ("footer.links.company.3.url", "/register", "footer", "Footer company link URL", 156),
+    ("footer.links.company.4.label", "Explore Hostels", "footer", "Footer company link label", 157),
+    ("footer.links.company.4.url", "/hostels", "footer", "Footer company link URL", 158),
+    (
+        "footer.bottom.copyright",
+        "© {year} नेपाल Hostel Finder. All rights reserved.",
+        "footer",
+        "Footer copyright text (supports {year})",
+        170,
+    ),
+    ("footer.bottom.link1.label", "About", "footer", "Footer bottom link label", 171),
+    ("footer.bottom.link1.url", "/about", "footer", "Footer bottom link URL", 172),
+    ("footer.bottom.link2.label", "Contact", "footer", "Footer bottom link label", 173),
+    ("footer.bottom.link2.url", "/contact", "footer", "Footer bottom link URL", 174),
+    ("footer.bottom.link3.label", "Hostels", "footer", "Footer bottom link label", 175),
+    ("footer.bottom.link3.url", "/hostels", "footer", "Footer bottom link URL", 176),
+    # Contact page
+    ("contact.hero.badge", "Get in Touch", "contact", "Contact hero badge", 10),
+    ("contact.hero.title_line_1", "We'd Love to Hear", "contact", "Contact hero first line", 20),
+    ("contact.hero.title_line_2", "From You", "contact", "Contact hero second line", 30),
+    (
+        "contact.hero.subtitle",
+        "Have a question, feedback, or need help with your booking? Drop us a message and our team will get back to you.",
+        "contact",
+        "Contact hero subtitle",
+        40,
+    ),
+    ("contact.info.email.title", "Email Us", "contact", "Contact card title", 50),
+    ("contact.info.email.value", "hello@hostelfinder.np", "contact", "Contact card value", 60),
+    ("contact.info.email.description", "We typically respond within 24 hours", "contact", "Contact card subtitle", 70),
+    ("contact.info.phone.title", "Call Us", "contact", "Contact card title", 80),
+    ("contact.info.phone.value", "+977-1-4XXXXXX", "contact", "Contact card value", 90),
+    ("contact.info.phone.description", "Mon-Fri, 9:00 AM - 6:00 PM NPT", "contact", "Contact card subtitle", 100),
+    ("contact.info.address.title", "Visit Us", "contact", "Contact card title", 110),
+    ("contact.info.address.value", "Kathmandu, Nepal", "contact", "Contact card value", 120),
+    ("contact.info.address.description", "Thamel, Kathmandu 44600", "contact", "Contact card subtitle", 130),
+    ("contact.form.title", "Send us a message", "contact", "Contact form title", 140),
+    (
+        "contact.form.subtitle",
+        "Fill out the form and our team will respond within 24 hours. For urgent matters, feel free to call us directly.",
+        "contact",
+        "Contact form subtitle",
+        150,
+    ),
+    (
+        "contact.support.fast_response",
+        "We aim to respond to all enquiries within 24 hours during business days.",
+        "contact",
+        "Contact support point",
+        160,
+    ),
+    (
+        "contact.support.helpful_support",
+        "Our dedicated team is here to help with bookings, listings, or any questions.",
+        "contact",
+        "Contact support point",
+        170,
+    ),
+    (
+        "contact.support.satisfaction",
+        "We're committed to resolving your concerns and ensuring a great experience.",
+        "contact",
+        "Contact support point",
+        180,
+    ),
+    (
+        "contact.success.description",
+        "Thank you for reaching out. Our team will review your enquiry and get back to you within 24 hours.",
+        "contact",
+        "Success state message",
+        190,
+    ),
+    ("contact.map.title", "Office Location", "contact", "Contact map section badge/title", 200),
+    ("contact.map.city", "Pokhara, Nepal", "contact", "Contact map city heading", 210),
+    (
+        "contact.map.description",
+        "Visit our support office in Pokhara.",
+        "contact",
+        "Contact map short description",
+        220,
+    ),
+    (
+        "contact.map.open_url",
+        "https://maps.google.com/?q=Proforma%20Digital%20Solution%20Pvt.Ltd%20Pokhara",
+        "contact",
+        "Contact map external Google Maps link",
+        230,
+    ),
+    (
+        "contact.map.embed_url",
+        "https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d280.49342038941364!2d83.9762193839299!3d28.20398683978662!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x399595a1ddb082e5%3A0xacfac249f506ab8b!2sProforma%20Digital%20Solution%20Pvt.Ltd!5e1!3m2!1sen!2snp!4v1773905545015!5m2!1sen!2snp",
+        "contact",
+        "Contact map iframe embed URL",
+        240,
+    ),
+    # Checkout pages
+    ("checkout.success.title", "Payment Successful!", "checkout", "Checkout success title", 10),
+    (
+        "checkout.success.subtitle",
+        "Your booking has been confirmed and payment received.",
+        "checkout",
+        "Checkout success subtitle",
+        20,
+    ),
+    (
+        "checkout.success.primary_button",
+        "View My Bookings",
+        "checkout",
+        "Checkout success primary button",
+        30,
+    ),
+    (
+        "checkout.success.secondary_button",
+        "Browse More Hostels",
+        "checkout",
+        "Checkout success secondary button",
+        40,
+    ),
+    ("checkout.cancel.title", "Payment Cancelled", "checkout", "Checkout cancel title", 50),
+    (
+        "checkout.cancel.subtitle",
+        "Your payment was not completed. Your booking is still pending.",
+        "checkout",
+        "Checkout cancel subtitle",
+        60,
+    ),
+    (
+        "checkout.cancel.primary_button",
+        "View My Bookings",
+        "checkout",
+        "Checkout cancel primary button",
+        70,
+    ),
+    (
+        "checkout.cancel.secondary_button",
+        "Browse Hostels",
+        "checkout",
+        "Checkout cancel secondary button",
+        80,
+    ),
+]
+
+
+class Command(BaseCommand):
+    help = "Create/update default site settings used for dynamic frontend copy."
+
+    def handle(self, *args, **options):
+        created = 0
+        updated = 0
+        for key, value, category, description, ordering in DEFAULT_SITE_SETTINGS:
+            obj, was_created = SiteSetting.objects.update_or_create(
+                key=key,
+                defaults={
+                    "value": value,
+                    "category": category,
+                    "description": description,
+                    "ordering": ordering,
+                    "is_active": True,
+                },
+            )
+            if was_created:
+                created += 1
+            else:
+                updated += 1
+
+        self.stdout.write(
+            self.style.SUCCESS(
+                f"Seed complete. Created: {created}, Updated: {updated}."
+            )
+        )

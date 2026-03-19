@@ -11,6 +11,7 @@ from django.contrib.auth.models import (
 )
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
+from django.utils import timezone
 from django.utils.text import slugify
 
 
@@ -122,6 +123,7 @@ class Hostel(models.Model):
     amenities = models.JSONField(default=list, blank=True)
     is_featured = models.BooleanField(default=False)
     is_active = models.BooleanField(default=True)
+    is_approved = models.BooleanField(default=False, help_text="Must be approved by admin before appearing in public listings.")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -216,6 +218,12 @@ class Booking(models.Model):
         max_length=15, choices=PAYMENT_STATUS_CHOICES, default="unpaid"
     )
     notes = models.TextField(blank=True, default="")
+    stripe_session_id = models.CharField(max_length=255, blank=True, default="")
+    stripe_payment_intent_id = models.CharField(
+        max_length=255, blank=True, default=""
+    )
+    auto_accept_enabled = models.BooleanField(default=False)
+    availability_locked = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -254,7 +262,9 @@ class Payment(models.Model):
         max_length=15, choices=STATUS_CHOICES, default="pending"
     )
     transaction_id = models.CharField(max_length=255, blank=True, default="")
+    stripe_refund_id = models.CharField(max_length=255, blank=True, default="")
     paid_at = models.DateTimeField(null=True, blank=True)
+    refunded_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
@@ -344,6 +354,142 @@ class Wishlist(models.Model):
 
     def __str__(self):
         return f"{self.user.email} ♥ {self.hostel.name}"
+
+
+# ══════════════════════════════════════════════════════════════
+# Site Settings (global key/value copy editable from admin)
+# ══════════════════════════════════════════════════════════════
+
+
+class SiteSetting(models.Model):
+    """Global site copy/settings stored as key-value pairs."""
+
+    key = models.CharField(max_length=120, unique=True)
+    value = models.TextField(blank=True, default="")
+    category = models.CharField(max_length=50, blank=True, default="general")
+    description = models.CharField(max_length=255, blank=True, default="")
+    ordering = models.PositiveIntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["category", "ordering", "key"]
+
+    def __str__(self):
+        return self.key
+
+
+# ══════════════════════════════════════════════════════════════
+# Site Page  (dynamic "About", etc. — editable from admin)
+# ══════════════════════════════════════════════════════════════
+
+
+# ══════════════════════════════════════════════════════════════
+# Social Media Link
+# ══════════════════════════════════════════════════════════════
+
+
+class SocialLink(models.Model):
+    """Social media links displayed in the sticky sidebar. Managed from admin."""
+
+    PLATFORM_CHOICES = [
+        ("facebook", "Facebook"),
+        ("instagram", "Instagram"),
+        ("twitter", "Twitter / X"),
+        ("youtube", "YouTube"),
+        ("tiktok", "TikTok"),
+        ("linkedin", "LinkedIn"),
+        ("whatsapp", "WhatsApp"),
+        ("viber", "Viber"),
+        ("other", "Other"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    platform = models.CharField(max_length=20, choices=PLATFORM_CHOICES)
+    url = models.URLField(max_length=500)
+    label = models.CharField(max_length=100, blank=True, default="", help_text="Display label (optional, defaults to platform name)")
+    is_active = models.BooleanField(default=True)
+    ordering = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["ordering", "created_at"]
+
+    def __str__(self):
+        return f"{self.get_platform_display()} — {self.url[:50]}"
+
+
+# ══════════════════════════════════════════════════════════════
+# Chatbot Q&A
+# ══════════════════════════════════════════════════════════════
+
+
+class ChatbotQA(models.Model):
+    """Predefined question-answer pairs for the chatbot. Managed from admin."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    question = models.CharField(max_length=500)
+    answer = models.TextField()
+    category = models.CharField(max_length=50, blank=True, default="general", help_text="Category for grouping (e.g. booking, general, payment)")
+    is_active = models.BooleanField(default=True)
+    ordering = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["ordering", "created_at"]
+        verbose_name = "Chatbot Q&A"
+        verbose_name_plural = "Chatbot Q&As"
+
+    def __str__(self):
+        return self.question[:80]
+
+
+class ChatbotUserQuery(models.Model):
+    """User-submitted chatbot queries and optional admin replies."""
+
+    STATUS_CHOICES = [
+        ("pending", "Pending"),
+        ("replied", "Replied"),
+        ("closed", "Closed"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name="chatbot_queries"
+    )
+    question = models.TextField(max_length=1200)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pending")
+    admin_reply = models.TextField(blank=True, default="")
+    replied_at = models.DateTimeField(null=True, blank=True)
+    reply_seen = models.BooleanField(default=False, help_text="Whether the user has seen the admin reply")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "Chatbot User Query"
+        verbose_name_plural = "Chatbot User Queries"
+
+    def save(self, *args, **kwargs):
+        previous_reply = ""
+        if self.pk:
+            previous = ChatbotUserQuery.objects.filter(pk=self.pk).values("admin_reply").first()
+            previous_reply = (previous or {}).get("admin_reply", "")
+
+        current_reply = (self.admin_reply or "").strip()
+        if current_reply and current_reply != (previous_reply or "").strip():
+            self.status = "replied"
+            if not self.replied_at:
+                self.replied_at = timezone.now()
+            # Reset seen flag when a new reply is posted
+            self.reply_seen = False
+
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.user.email} — {self.question[:60]}"
 
 
 # ══════════════════════════════════════════════════════════════

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, Building2, MapPin, Users, Eye, Edit, PlusCircle } from "lucide-react";
+import { ArrowLeft, Building2, MapPin, Users, Eye, Edit, PlusCircle, Clock } from "lucide-react";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { Badge, Button } from "@/components/ui";
 import { formatPrice } from "@/lib/utils";
@@ -100,14 +100,30 @@ function HostHostelsContent() {
                 </div>
               </div>
               <div className="flex items-center gap-3">
-                <Badge variant="success">Active</Badge>
-                <Link
-                  href={`/hostels/${hostel.slug}`}
-                  className="rounded-lg border border-zinc-200 p-2 text-zinc-400 transition-colors hover:bg-zinc-50 hover:text-zinc-600"
-                  title="View"
-                >
-                  <Eye className="h-4 w-4" />
-                </Link>
+                {hostel.isApproved ? (
+                  <Badge variant="success">Active</Badge>
+                ) : (
+                  <Badge variant="warning">
+                    <Clock className="mr-1 h-3 w-3" />
+                    Pending Approval
+                  </Badge>
+                )}
+                {hostel.isApproved ? (
+                  <Link
+                    href={`/hostels/${hostel.slug}`}
+                    className="rounded-lg border border-zinc-200 p-2 text-zinc-400 transition-colors hover:bg-zinc-50 hover:text-zinc-600"
+                    title="View"
+                  >
+                    <Eye className="h-4 w-4" />
+                  </Link>
+                ) : (
+                  <span
+                    className="rounded-lg border border-zinc-100 p-2 text-zinc-200 cursor-not-allowed"
+                    title="Not yet listed — awaiting admin approval"
+                  >
+                    <Eye className="h-4 w-4" />
+                  </span>
+                )}
                 <Link
                   href={`/account/hostels/${hostel.id}/edit`}
                   className="rounded-lg border border-zinc-200 p-2 text-zinc-400 transition-colors hover:bg-zinc-50 hover:text-zinc-600"

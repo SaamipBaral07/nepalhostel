@@ -4,6 +4,7 @@ import { useGoogleLogin } from "@react-oauth/google";
 
 interface GoogleLoginButtonProps {
   onSuccess: (credential: string) => void;
+  onError?: (message: string) => void;
   isLoading?: boolean;
 }
 
@@ -35,12 +36,16 @@ function GoogleLoginDisabledButton() {
   );
 }
 
-function GoogleLoginEnabled({ onSuccess, isLoading }: GoogleLoginButtonProps) {
+function GoogleLoginEnabled({ onSuccess, onError, isLoading }: GoogleLoginButtonProps) {
   const login = useGoogleLogin({
     onSuccess: (tokenResponse) => {
       onSuccess(tokenResponse.access_token);
     },
+    onError: () => {
+      onError?.("Google sign-in was cancelled or blocked by the browser.");
+    },
     flow: "implicit",
+    scope: "openid email profile",
   });
 
   return (
@@ -84,11 +89,18 @@ function GoogleLoginEnabled({ onSuccess, isLoading }: GoogleLoginButtonProps) {
 
 export function GoogleLoginButton({
   onSuccess,
+  onError,
   isLoading,
 }: GoogleLoginButtonProps) {
   if (!GOOGLE_CLIENT_ID) {
     return <GoogleLoginDisabledButton />;
   }
 
-  return <GoogleLoginEnabled onSuccess={onSuccess} isLoading={isLoading} />;
+  return (
+    <GoogleLoginEnabled
+      onSuccess={onSuccess}
+      onError={onError}
+      isLoading={isLoading}
+    />
+  );
 }

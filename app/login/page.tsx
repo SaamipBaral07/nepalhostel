@@ -437,6 +437,7 @@ export default function LoginPage() {
                 {/* Google */}
                 <GoogleLoginButton
                   onSuccess={handleGoogleLogin}
+                  onError={(message) => setError(message)}
                   isLoading={isGoogleLoading}
                 />
 

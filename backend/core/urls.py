@@ -128,8 +128,13 @@ urlpatterns = [
     ),
     path(
         "payments/<uuid:pk>/esewa/",
-        views.esewa_placeholder,
-        name="esewa-placeholder",
+        views.create_esewa_payment,
+        name="esewa-initiate",
+    ),
+    path(
+        "payments/esewa/success/",
+        views.esewa_success,
+        name="esewa-success",
     ),
     # ── Contact ───────────────────────────────────────────────
     path(
@@ -163,5 +168,37 @@ urlpatterns = [
         "pages/<slug:slug>/",
         views.SitePageDetailView.as_view(),
         name="site-page-detail",
+    ),
+    path(
+        "site-settings/",
+        views.SiteSettingListView.as_view(),
+        name="site-settings-list",
+    ),
+    # ── Social Links ───────────────────────────────────────────
+    path(
+        "social-links/",
+        views.SocialLinkListView.as_view(),
+        name="social-link-list",
+    ),
+    # ── Chatbot ────────────────────────────────────────────────
+    path(
+        "chatbot/questions/",
+        views.ChatbotQAListView.as_view(),
+        name="chatbot-qa-list",
+    ),
+    path(
+        "chatbot/query/",
+        views.ChatbotUserQueryCreateView.as_view(),
+        name="chatbot-query-create",
+    ),
+    path(
+        "chatbot/my-queries/",
+        views.MyChatbotQueryListView.as_view(),
+        name="chatbot-query-list",
+    ),
+    path(
+        "chatbot/mark-seen/<uuid:pk>/",
+        views.mark_chatbot_reply_as_seen,
+        name="chatbot-mark-seen",
     ),
 ]

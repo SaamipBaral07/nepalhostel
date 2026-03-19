@@ -1,53 +1,95 @@
-"""
-Django settings for नेपाल Hostel Finder.
-"""
+"""Django settings for the Nepal Hostel Finder backend."""
 
 import os
-from pathlib import Path
 from datetime import timedelta
+from pathlib import Path
+
+from decouple import Csv, config
 from dotenv import load_dotenv
 
+# Build paths inside the project like this: BASE_DIR / "subdir".
 BASE_DIR = Path(__file__).resolve().parent.parent
+PROJECT_ROOT = BASE_DIR.parent
 
-# Load env files for local development convenience without overriding existing vars.
-load_dotenv(BASE_DIR / ".env", override=False)
-load_dotenv(BASE_DIR.parent / ".env.local", override=False)
+# Load env files from both backend and project root.
+# This allows local dev keys stored in root .env.local to be visible to Django.
+load_dotenv(BASE_DIR / ".env")
+load_dotenv(PROJECT_ROOT / ".env")
+load_dotenv(PROJECT_ROOT / ".env.local")
 
-SECRET_KEY = os.environ.get(
-    "DJANGO_SECRET_KEY",
-    "dev-insecure-key-change-in-production-abc123xyz",
+
+def env_with_alias(
+    primary: str,
+    *,
+    aliases: tuple[str, ...] = (),
+    default=None,
+    cast=str,
+):
+    """Read env var from primary key, then fallback aliases, with optional casting."""
+    raw = os.getenv(primary)
+    if raw in (None, ""):
+        for alias in aliases:
+            alias_raw = os.getenv(alias)
+            if alias_raw not in (None, ""):
+                raw = alias_raw
+                break
+
+    if raw in (None, ""):
+        return default
+
+    if cast is bool:
+        return str(raw).strip().lower() in {"1", "true", "yes", "on"}
+    if cast is Csv:
+        # Kept for compatibility; not used directly.
+        return Csv()(raw)
+    return cast(raw)
+
+
+# Quick-start development settings - unsuitable for production
+SECRET_KEY = config(
+    "SECRET_KEY",
+    default=env_with_alias(
+        "SECRET_KEY",
+        aliases=("DJANGO_SECRET_KEY",),
+        default="django-insecure-change-me-in-production",
+    ),
 )
 
-DEBUG = os.environ.get("DJANGO_DEBUG", "True").lower() in ("true", "1", "yes")
+DEBUG = env_with_alias(
+    "DEBUG",
+    aliases=("DJANGO_DEBUG",),
+    default=True,
+    cast=bool,
+)
 
-ALLOWED_HOSTS = os.environ.get("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
+ALLOWED_HOSTS = config(
+    "ALLOWED_HOSTS",
+    default=env_with_alias(
+        "ALLOWED_HOSTS",
+        aliases=("DJANGO_ALLOWED_HOSTS",),
+        default="127.0.0.1,localhost",
+    ),
+    cast=Csv(),
+)
 
-# ---------------------------------------------------------------------------
-# Apps
-# ---------------------------------------------------------------------------
 
+# Application definition
 INSTALLED_APPS = [
-    "jazzmin",  # Better admin UI
+    "jazzmin",
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
-    # Third-party
-    "rest_framework",
     "corsheaders",
-    # Local
+    "rest_framework",
     "core",
 ]
 
-# ---------------------------------------------------------------------------
-# Middleware
-# ---------------------------------------------------------------------------
-
 MIDDLEWARE = [
-    "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
+    "corsheaders.middleware.CorsMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -74,130 +116,119 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = "config.wsgi.application"
+ASGI_APPLICATION = "config.asgi.application"
 
-# ---------------------------------------------------------------------------
-# Database — SQLite for dev, swap to PostgreSQL for production
-# ---------------------------------------------------------------------------
 
+# Database
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.sqlite3",
         "NAME": BASE_DIR / "db.sqlite3",
     }
-    # PostgreSQL example:
-    # "default": {
-    #     "ENGINE": "django.db.backends.postgresql",
-    #     "NAME": os.environ.get("DB_NAME", "hostel_nepal"),
-    #     "USER": os.environ.get("DB_USER", "postgres"),
-    #     "PASSWORD": os.environ.get("DB_PASSWORD", ""),
-    #     "HOST": os.environ.get("DB_HOST", "localhost"),
-    #     "PORT": os.environ.get("DB_PORT", "5432"),
-    # }
 }
 
-# ---------------------------------------------------------------------------
-# Custom user model
-# ---------------------------------------------------------------------------
 
-AUTH_USER_MODEL = "core.User"
-
-# ---------------------------------------------------------------------------
-# Auth password validators
-# ---------------------------------------------------------------------------
-
+# Password validation
 AUTH_PASSWORD_VALIDATORS = [
-    {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},
+    {
+        "NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator",
+    },
+    {
+        "NAME": "django.contrib.auth.password_validation.MinimumLengthValidator",
+    },
+    {
+        "NAME": "django.contrib.auth.password_validation.CommonPasswordValidator",
+    },
+    {
+        "NAME": "django.contrib.auth.password_validation.NumericPasswordValidator",
+    },
 ]
 
-# ---------------------------------------------------------------------------
-# REST Framework
-# ---------------------------------------------------------------------------
 
-REST_FRAMEWORK = {
-    "DEFAULT_AUTHENTICATION_CLASSES": (
-        "rest_framework_simplejwt.authentication.JWTAuthentication",
-    ),
-    "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
-    "PAGE_SIZE": 12,
-    "EXCEPTION_HANDLER": "core.utils.custom_exception_handler",
-}
-
-# ---------------------------------------------------------------------------
-# Simple JWT
-# ---------------------------------------------------------------------------
-
-SIMPLE_JWT = {
-    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=60),
-    "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
-    "AUTH_HEADER_TYPES": ("Bearer",),
-}
-
-# ---------------------------------------------------------------------------
-# CORS
-# ---------------------------------------------------------------------------
-
-CORS_ALLOWED_ORIGINS = [
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-]
-
-# ---------------------------------------------------------------------------
-# Stripe (env only)
-# ---------------------------------------------------------------------------
-
-STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY")
-STRIPE_PUBLIC_KEY = os.environ.get("STRIPE_PUBLIC_KEY")
-# Backward-compat alias for any existing code/docs using the old name.
-STRIPE_PUBLISHABLE_KEY = STRIPE_PUBLIC_KEY
-FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:3000")
-
-# ---------------------------------------------------------------------------
-# Google OAuth
-# ---------------------------------------------------------------------------
-
-GOOGLE_OAUTH_CLIENT_ID = os.environ.get(
-    "GOOGLE_OAUTH_CLIENT_ID",
-    "",  # Set your Google OAuth Client ID here or via env var
-)
-
-# ---------------------------------------------------------------------------
-# Email (console backend for development — switch to SMTP in production)
-# ---------------------------------------------------------------------------
-
-EMAIL_BACKEND = os.environ.get("EMAIL_BACKEND", "")
-EMAIL_HOST = os.environ.get("EMAIL_HOST", "smtp.gmail.com")
-EMAIL_PORT = int(os.environ.get("EMAIL_PORT", "587"))
-EMAIL_USE_TLS = os.environ.get("EMAIL_USE_TLS", "True").lower() in ("true", "1")
-EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "")
-EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
-DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "noreply@hostelnepal.com")
-
-# If backend is not explicitly set, prefer SMTP when credentials exist,
-# otherwise keep console backend for local development.
-if not EMAIL_BACKEND:
-    if EMAIL_HOST_USER and EMAIL_HOST_PASSWORD:
-        EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
-    else:
-        EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
-
-# ---------------------------------------------------------------------------
-# Internationalisation
-# ---------------------------------------------------------------------------
-
+# Internationalization
 LANGUAGE_CODE = "en-us"
 TIME_ZONE = "Asia/Kathmandu"
 USE_I18N = True
 USE_TZ = True
 
-# ---------------------------------------------------------------------------
-# Static & Media files
-# ---------------------------------------------------------------------------
 
-STATIC_URL = "/static/"
+# Static & media
+STATIC_URL = "static/"
+STATIC_ROOT = BASE_DIR / "staticfiles"
+
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
-# Used as fallback in serializers when request context is unavailable
-SITE_URL = os.environ.get("SITE_URL", "http://localhost:8000")
 
+# Default primary key field type
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+
+# Custom user model
+AUTH_USER_MODEL = "core.User"
+
+
+# CORS
+CORS_ALLOWED_ORIGINS = config(
+    "CORS_ALLOWED_ORIGINS",
+    default="http://localhost:3000,http://127.0.0.1:3000",
+    cast=Csv(),
+)
+
+CORS_ALLOW_CREDENTIALS = True
+
+
+# DRF & JWT
+REST_FRAMEWORK = {
+    "DEFAULT_AUTHENTICATION_CLASSES": (
+        "rest_framework_simplejwt.authentication.JWTAuthentication",
+    ),
+    "DEFAULT_PERMISSION_CLASSES": (
+        "rest_framework.permissions.AllowAny",
+    ),
+    "DEFAULT_RENDERER_CLASSES": (
+        "rest_framework.renderers.JSONRenderer",
+    ),
+    "EXCEPTION_HANDLER": "core.utils.custom_exception_handler",
+}
+
+SIMPLE_JWT = {
+    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=30),
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
+    "ROTATE_REFRESH_TOKENS": False,
+    "BLACKLIST_AFTER_ROTATION": False,
+    "AUTH_HEADER_TYPES": ("Bearer",),
+}
+
+
+# Frontend and email helpers used by core views
+FRONTEND_URL = config("FRONTEND_URL", default="http://localhost:3000")
+DEFAULT_FROM_EMAIL = config(
+    "DEFAULT_FROM_EMAIL",
+    default="noreply@hostelnepal.local",
+)
+
+EMAIL_BACKEND = config(
+    "EMAIL_BACKEND",
+    default="django.core.mail.backends.console.EmailBackend",
+)
+
+
+# Third-party integrations
+STRIPE_SECRET_KEY = config("STRIPE_SECRET_KEY", default="")
+STRIPE_NPR_PER_USD = config("STRIPE_NPR_PER_USD", default=147.28, cast=float)
+
+# eSewa (ePay v2)
+ESEWA_PRODUCT_CODE = config("ESEWA_PRODUCT_CODE", default="EPAYTEST")
+ESEWA_SECRET_KEY = config(
+    "ESEWA_SECRET_KEY",
+    default="8gBm/:&EnhH.1/q" if DEBUG else "",
+)
+ESEWA_FORM_URL = config(
+    "ESEWA_FORM_URL",
+    default="https://rc-epay.esewa.com.np/api/epay/main/v2/form",
+)
+ESEWA_STATUS_URL = config(
+    "ESEWA_STATUS_URL",
+    default="https://rc.esewa.com.np/api/epay/transaction/status/",
+)
