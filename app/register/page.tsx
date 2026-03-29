@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import {
@@ -9,6 +9,7 @@ import {
   MapPin, Star, TrendingUp, Users, BadgeCheck, Wallet,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
+import { authApi } from "@/lib/api/auth";
 import { APP_NAME } from "@/lib/constants";
 import type { UserRole } from "@/lib/types";
 
@@ -25,11 +26,27 @@ export default function RegisterPage() {
   const [avatar, setAvatar] = useState<File | null>(null);
   const [avatarPreview, setAvatarPreview] = useState<string>("");
   const [showPassword, setShowPassword] = useState(false);
+  const [otp, setOtp] = useState("");
+  const [otpRequested, setOtpRequested] = useState(false);
+  const [isSendingOtp, setIsSendingOtp] = useState(false);
+  const [isVerifyingOtp, setIsVerifyingOtp] = useState(false);
+  const [isEmailVerified, setIsEmailVerified] = useState(false);
+  const [verifiedEmail, setVerifiedEmail] = useState("");
+  const [otpMessage, setOtpMessage] = useState("");
+  const [otpCooldown, setOtpCooldown] = useState(0);
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
 
-  const update = (key: string, value: string) =>
+  const update = (key: string, value: string) => {
     setForm((prev) => ({ ...prev, [key]: value }));
+    if (key === "email") {
+      const normalized = value.trim().toLowerCase();
+      if (normalized !== verifiedEmail) {
+        setIsEmailVerified(false);
+      }
+      setOtpMessage("");
+    }
+  };
 
   const isHost = form.role === "host";
 
@@ -50,9 +67,80 @@ export default function RegisterPage() {
     setAvatarPreview("");
   };
 
+  useEffect(() => {
+    if (otpCooldown <= 0) return;
+    const timer = setTimeout(() => setOtpCooldown((v) => v - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [otpCooldown]);
+
+  const normalizedEmail = form.email.trim().toLowerCase();
+
+  const handleRequestOtp = async () => {
+    setError("");
+    setOtpMessage("");
+
+    if (!normalizedEmail) {
+      setError("Please enter your email address first.");
+      return;
+    }
+
+    setIsSendingOtp(true);
+    try {
+      const response = await authApi.requestEmailVerification({
+        email: normalizedEmail,
+      });
+      setOtpRequested(true);
+      setIsEmailVerified(false);
+      setVerifiedEmail("");
+      setOtp("");
+      setOtpCooldown(90);
+      setOtpMessage(response.message || "OTP sent to your email.");
+    } catch (err: unknown) {
+      const apiErr = err as { message?: string };
+      setError(apiErr.message || "Failed to send OTP. Please try again.");
+    } finally {
+      setIsSendingOtp(false);
+    }
+  };
+
+  const handleVerifyOtp = async () => {
+    setError("");
+    setOtpMessage("");
+
+    if (!otpRequested) {
+      setError("Request OTP first.");
+      return;
+    }
+    if (!/^\d{6}$/.test(otp)) {
+      setError("Enter a valid 6-digit OTP.");
+      return;
+    }
+
+    setIsVerifyingOtp(true);
+    try {
+      const response = await authApi.confirmEmailVerification({
+        email: normalizedEmail,
+        otp,
+      });
+      setIsEmailVerified(true);
+      setVerifiedEmail(normalizedEmail);
+      setOtpMessage(response.message || "Email verified successfully.");
+    } catch (err: unknown) {
+      const apiErr = err as { message?: string };
+      setIsEmailVerified(false);
+      setError(apiErr.message || "OTP verification failed.");
+    } finally {
+      setIsVerifyingOtp(false);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
+    if (!isEmailVerified || verifiedEmail !== normalizedEmail) {
+      setError("Please verify your email with OTP before creating account.");
+      return;
+    }
     if (form.password !== form.confirmPassword) { setError("Passwords do not match."); return; }
     if (form.password.length < 8) { setError("Password must be at least 8 characters."); return; }
     setIsLoading(true);
@@ -372,6 +460,44 @@ export default function RegisterPage() {
         }
         .field-input.pr { padding-right: 42px; }
 
+        .otp-row {
+          display: flex;
+          gap: 8px;
+          margin-top: 10px;
+          align-items: center;
+        }
+
+        @media (max-width: 640px) {
+          .otp-row {
+            flex-direction: column;
+            align-items: stretch;
+          }
+        }
+
+        .otp-btn {
+          height: 40px;
+          border-radius: 10px;
+          border: 1px solid #d1d5db;
+          background: #ffffff;
+          color: #0f172a;
+          font-size: 12px;
+          font-weight: 600;
+          padding: 0 12px;
+          cursor: pointer;
+          transition: all 0.18s;
+          white-space: nowrap;
+        }
+
+        .otp-btn:hover { background: #f8fafc; border-color: #9ca3af; }
+        .otp-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+        .otp-status {
+          margin-top: 8px;
+          font-size: 12px;
+          color: #047857;
+          font-weight: 600;
+        }
+
         .field-input-wrap { position: relative; }
 
         .eye-btn {
@@ -614,6 +740,58 @@ export default function RegisterPage() {
                       id="email" type="email" className="field-input" placeholder="you@example.com"
                       value={form.email} onChange={(e) => update("email", e.target.value)} required autoComplete="email"
                     />
+                    {normalizedEmail && (
+                      <div style={{
+                        padding: "10px 12px",
+                        background: "#f0fdf4",
+                        border: "1px solid #bbf7d0",
+                        borderRadius: "10px",
+                        marginTop: "8px",
+                        marginBottom: "8px",
+                        fontSize: "11px",
+                        color: "#166534",
+                        lineHeight: "1.4",
+                      }}>
+                        <p>📧 We'll send a 6-digit OTP to verify this email. Verification is required to create account.</p>
+                      </div>
+                    )}
+                    <div className="otp-row">
+                      <button
+                        type="button"
+                        className="otp-btn"
+                        onClick={handleRequestOtp}
+                        disabled={isSendingOtp || otpCooldown > 0 || !normalizedEmail}
+                      >
+                        {isSendingOtp
+                          ? "Sending..."
+                          : otpCooldown > 0
+                          ? `Resend in ${otpCooldown}s`
+                          : otpRequested
+                          ? "Resend OTP"
+                          : "Send OTP"}
+                      </button>
+                      <input
+                        type="text"
+                        className="field-input"
+                        placeholder="6-digit OTP from email"
+                        maxLength={6}
+                        value={otp}
+                        onChange={(e) => setOtp(e.target.value.replace(/\D/g, ""))}
+                        disabled={!otpRequested || isEmailVerified}
+                      />
+                      <button
+                        type="button"
+                        className="otp-btn"
+                        onClick={handleVerifyOtp}
+                        disabled={!otpRequested || isVerifyingOtp || isEmailVerified || otp.length !== 6}
+                      >
+                        {isVerifyingOtp ? "Verifying..." : isEmailVerified ? "✓ Verified" : "Verify"}
+                      </button>
+                    </div>
+                    <p style={{ fontSize: "11px", color: "#6b7280", marginTop: "6px", lineHeight: "1.4" }}>
+                      Check spam folder if OTP doesn't arrive. Wait 90s to resend.
+                    </p>
+                    {otpMessage && <p className="otp-status">{otpMessage}</p>}
                   </div>
 
                   <div className="field-row">
@@ -672,7 +850,7 @@ export default function RegisterPage() {
                     </div>
                   </div>
 
-                  <button type="submit" className="reg-submit" disabled={isLoading}>
+                  <button type="submit" className="reg-submit" disabled={isLoading || !isEmailVerified}>
                     {isLoading ? (
                       <><div className="btn-spinner" /> Creating your account…</>
                     ) : (

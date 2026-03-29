@@ -16,6 +16,7 @@ from .models import (
     ChatbotUserQuery,
     City,
     ContactEnquiry,
+    EmailVerification,
     Hostel,
     HostelImage,
     Payment,
@@ -132,6 +133,13 @@ class RegisterSerializer(serializers.Serializer):
             raise serializers.ValidationError(
                 "A user with this email already exists."
             )
+        verification = EmailVerification.objects.filter(
+            email__iexact=value
+        ).first()
+        if not verification or not verification.is_verified:
+            raise serializers.ValidationError(
+                "Email is not verified. Please verify your email before registering."
+            )
         return value
 
     def validate(self, data):
@@ -156,8 +164,27 @@ class RegisterSerializer(serializers.Serializer):
         if avatar:
             user.avatar = avatar
             user.save()
+
+        # Consume successful verification so a new registration requires a new OTP.
+        EmailVerification.objects.filter(email__iexact=user.email).delete()
         
         return user
+
+
+class EmailVerificationRequestSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+
+    def validate_email(self, value):
+        if User.objects.filter(email__iexact=value).exists():
+            raise serializers.ValidationError(
+                "A user with this email already exists."
+            )
+        return value
+
+
+class EmailVerificationConfirmSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+    otp = serializers.RegexField(r"^\d{6}$")
 
 
 class LoginSerializer(serializers.Serializer):

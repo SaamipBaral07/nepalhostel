@@ -11,6 +11,16 @@ from . import views
 
 urlpatterns = [
     # ── Auth ──────────────────────────────────────────────────
+    path(
+        "auth/email-verification/request/",
+        views.EmailVerificationRequestView.as_view(),
+        name="email-verification-request",
+    ),
+    path(
+        "auth/email-verification/confirm/",
+        views.EmailVerificationConfirmView.as_view(),
+        name="email-verification-confirm",
+    ),
     path("auth/register/", views.RegisterView.as_view(), name="register"),
     path("auth/login/", views.LoginView.as_view(), name="login"),
     path("auth/google/", views.GoogleLoginView.as_view(), name="google-login"),

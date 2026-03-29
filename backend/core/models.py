@@ -3,6 +3,7 @@
 """
 
 import uuid
+from datetime import timedelta
 
 from django.contrib.auth.models import (
     AbstractBaseUser,
@@ -65,6 +66,32 @@ class User(AbstractBaseUser, PermissionsMixin):
 
     def __str__(self):
         return self.email
+
+
+class EmailVerification(models.Model):
+    """Stores one-time verification state for registration emails."""
+
+    email = models.EmailField(unique=True)
+    otp_hash = models.CharField(max_length=128, blank=True, default="")
+    expires_at = models.DateTimeField(null=True, blank=True)
+    verified_at = models.DateTimeField(null=True, blank=True)
+    attempts = models.PositiveIntegerField(default=0)
+    send_count = models.PositiveIntegerField(default=0)
+    last_sent_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-updated_at"]
+
+    @property
+    def is_verified(self):
+        if not self.verified_at:
+            return False
+        return self.verified_at >= timezone.now() - timedelta(hours=24)
+
+    def __str__(self):
+        return f"Email verification for {self.email}"
 
 
 # ══════════════════════════════════════════════════════════════

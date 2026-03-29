@@ -8,9 +8,11 @@ Response conventions
 """
 
 import base64
+from datetime import timedelta
 import hashlib
 import hmac
 import json
+import secrets
 import uuid
 from decimal import Decimal, ROUND_HALF_UP
 from urllib.parse import urlencode
@@ -39,6 +41,7 @@ from .models import (
     ChatbotUserQuery,
     City,
     ContactEnquiry,
+    EmailVerification,
     Hostel,
     HostelImage,
     Payment,
@@ -58,6 +61,8 @@ from .serializers import (
     ChatbotUserQuerySerializer,
     CitySerializer,
     ContactEnquirySerializer,
+    EmailVerificationConfirmSerializer,
+    EmailVerificationRequestSerializer,
     ForgotPasswordSerializer,
     GoogleLoginSerializer,
     HostelDetailSerializer,
@@ -97,9 +102,224 @@ def get_tokens_for_user(user):
     }
 
 
+OTP_TTL_MINUTES = 10
+OTP_RESEND_SECONDS = 90
+OTP_MAX_ATTEMPTS = 5
+OTP_MAX_SEND_PER_DAY = 10
+
+
+def _hash_registration_otp(email: str, otp: str) -> str:
+    email_key = email.strip().lower()
+    payload = f"{email_key}:{otp}".encode("utf-8")
+    secret = django_settings.SECRET_KEY.encode("utf-8")
+    return hmac.new(secret, payload, hashlib.sha256).hexdigest()
+
+
+def _build_registration_otp() -> str:
+    return f"{secrets.randbelow(1_000_000):06d}"
+
+
 # ═══════════════════════════════════════════════════════
 # Auth
 # ═══════════════════════════════════════════════════════
+
+
+class EmailVerificationRequestView(generics.GenericAPIView):
+    permission_classes = [permissions.AllowAny]
+    serializer_class = EmailVerificationRequestSerializer
+
+    def post(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        email = serializer.validated_data["email"].strip().lower()
+        now = timezone.now()
+
+        verification, _ = EmailVerification.objects.get_or_create(email=email)
+
+        if (
+            verification.last_sent_at
+            and verification.last_sent_at.date() != now.date()
+        ):
+            verification.send_count = 0
+
+        if (
+            verification.last_sent_at
+            and (now - verification.last_sent_at).total_seconds() < OTP_RESEND_SECONDS
+        ):
+            return api_response(
+                None,
+                message="Please wait at least 90 seconds before requesting another OTP.",
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            )
+
+        if verification.send_count >= OTP_MAX_SEND_PER_DAY:
+            return api_response(
+                None,
+                message="Daily OTP limit reached. Please try again tomorrow.",
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            )
+
+        otp = _build_registration_otp()
+        verification.otp_hash = _hash_registration_otp(email, otp)
+        verification.expires_at = now + timedelta(minutes=OTP_TTL_MINUTES)
+        verification.verified_at = None
+        verification.attempts = 0
+        verification.send_count += 1
+        verification.last_sent_at = now
+        verification.save()
+
+        # Send professional HTML email
+        html_message = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        </head>
+        <body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f8fafc;">
+            <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f8fafc; padding: 40px 20px;">
+                <tr>
+                    <td align="center">
+                        <table width="600" cellpadding="0" cellspacing="0" style="background-color: #ffffff; border-radius: 16px; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.07); overflow: hidden;">
+                            <!-- Header -->
+                            <tr>
+                                <td style="background: linear-gradient(135deg, #064e3b 0%, #059669 100%); padding: 32px 40px; text-align: center;">
+                                    <h1 style="margin: 0; color: #ffffff; font-size: 24px; font-weight: 700;">Hostel Nepal</h1>
+                                    <p style="margin: 8px 0 0; color: rgba(255, 255, 255, 0.9); font-size: 14px;">Email Verification</p>
+                                </td>
+                            </tr>
+                            <!-- Body -->
+                            <tr>
+                                <td style="padding: 40px;">
+                                    <h2 style="margin: 0 0 16px; color: #111827; font-size: 20px; font-weight: 600;">Verify Your Email Address</h2>
+                                    <p style="margin: 0 0 24px; color: #6b7280; font-size: 15px; line-height: 1.6;">
+                                        Thank you for registering with Hostel Nepal. Please use the verification code below to complete your registration:
+                                    </p>
+                                    <!-- OTP Box -->
+                                    <table width="100%" cellpadding="0" cellspacing="0">
+                                        <tr>
+                                            <td align="center" style="padding: 24px 0;">
+                                                <div style="display: inline-block; background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%); border: 2px solid #10b981; border-radius: 12px; padding: 20px 40px;">
+                                                    <p style="margin: 0; color: #6b7280; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;">Your OTP Code</p>
+                                                    <p style="margin: 8px 0 0; color: #059669; font-size: 36px; font-weight: 700; letter-spacing: 0.1em; font-family: 'Courier New', monospace;">{otp}</p>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    </table>
+                                    <p style="margin: 24px 0 0; color: #6b7280; font-size: 14px; line-height: 1.6;">
+                                        This code will expire in <strong style="color: #111827;">{OTP_TTL_MINUTES} minutes</strong>. Please enter it on the registration page to verify your email address.
+                                    </p>
+                                    <div style="margin-top: 24px; padding: 16px; background-color: #fef3c7; border-left: 4px solid #f59e0b; border-radius: 8px;">
+                                        <p style="margin: 0; color: #92400e; font-size: 13px; line-height: 1.5;">
+                                            <strong>Security Notice:</strong> If you didn't request this code, please ignore this email. Your account is safe.
+                                        </p>
+                                    </div>
+                                </td>
+                            </tr>
+                            <!-- Footer -->
+                            <tr>
+                                <td style="background-color: #f9fafb; padding: 24px 40px; border-top: 1px solid #e5e7eb;">
+                                    <p style="margin: 0; color: #9ca3af; font-size: 12px; text-align: center; line-height: 1.5;">
+                                        © 2024 Hostel Nepal. All rights reserved.<br>
+                                        This is an automated message, please do not reply.
+                                    </p>
+                                </td>
+                            </tr>
+                        </table>
+                    </td>
+                </tr>
+            </table>
+        </body>
+        </html>
+        """
+        
+        plain_message = (
+            "Use this OTP to verify your email for registration:\n\n"
+            f"{otp}\n\n"
+            f"This OTP expires in {OTP_TTL_MINUTES} minutes.\n"
+            "If you did not request this, please ignore this message."
+        )
+
+        try:
+            send_mail(
+                subject="Your Hostel Nepal Registration Code",
+                message=plain_message,
+                from_email=django_settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[email],
+                fail_silently=False,
+                html_message=html_message,
+            )
+        except Exception as e:
+            # Log the error but don't expose details to user
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Failed to send OTP email to {email}: {str(e)}")
+            return api_response(
+                None,
+                message="Failed to send OTP. Please check your email address and try again.",
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        return api_response(None, message="OTP sent to your email address. Please check your inbox and spam folder.")
+
+
+class EmailVerificationConfirmView(generics.GenericAPIView):
+    permission_classes = [permissions.AllowAny]
+    serializer_class = EmailVerificationConfirmSerializer
+
+    def post(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        email = serializer.validated_data["email"].strip().lower()
+        otp = serializer.validated_data["otp"]
+
+        verification = EmailVerification.objects.filter(email__iexact=email).first()
+        if not verification or not verification.otp_hash:
+            return api_response(
+                None,
+                message="No active OTP found for this email. Please request a new OTP.",
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not verification.expires_at or verification.expires_at < timezone.now():
+            return api_response(
+                None,
+                message="OTP expired. Please request a new OTP.",
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if verification.attempts >= OTP_MAX_ATTEMPTS:
+            verification.otp_hash = ""
+            verification.expires_at = None
+            verification.save(update_fields=["otp_hash", "expires_at", "updated_at"])
+            return api_response(
+                None,
+                message="Too many invalid attempts. Request a new OTP.",
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+
+        submitted_hash = _hash_registration_otp(email, otp)
+        if not hmac.compare_digest(submitted_hash, verification.otp_hash):
+            verification.attempts += 1
+            verification.save(update_fields=["attempts", "updated_at"])
+            remaining = max(OTP_MAX_ATTEMPTS - verification.attempts, 0)
+            return api_response(
+                None,
+                message=f"Invalid OTP. {remaining} attempt(s) remaining.",
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+
+        verification.verified_at = timezone.now()
+        verification.otp_hash = ""
+        verification.expires_at = None
+        verification.attempts = 0
+        verification.save(
+            update_fields=["verified_at", "otp_hash", "expires_at", "attempts", "updated_at"]
+        )
+
+        return api_response(None, message="Email verified successfully.")
 
 
 class RegisterView(generics.CreateAPIView):
@@ -295,19 +515,97 @@ class ForgotPasswordView(generics.GenericAPIView):
             f"?uid={uid}&token={token}"
         )
 
-        send_mail(
-            subject="Reset your Hostel Nepal password",
-            message=(
-                f"Hi {user.full_name},\n\n"
-                f"Click the link below to reset your password:\n"
-                f"{reset_url}\n\n"
-                f"This link expires in 24 hours.\n\n"
-                f"If you did not request this, please ignore this email."
-            ),
-            from_email=django_settings.DEFAULT_FROM_EMAIL,
-            recipient_list=[user.email],
-            fail_silently=False,
+        html_message = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        </head>
+        <body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f8fafc;">
+            <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f8fafc; padding: 40px 20px;">
+                <tr>
+                    <td align="center">
+                        <table width="600" cellpadding="0" cellspacing="0" style="background-color: #ffffff; border-radius: 16px; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.07); overflow: hidden;">
+                            <!-- Header -->
+                            <tr>
+                                <td style="background: linear-gradient(135deg, #064e3b 0%, #059669 100%); padding: 32px 40px; text-align: center;">
+                                    <h1 style="margin: 0; color: #ffffff; font-size: 24px; font-weight: 700;">Hostel Nepal</h1>
+                                    <p style="margin: 8px 0 0; color: rgba(255, 255, 255, 0.9); font-size: 14px;">Password Reset Request</p>
+                                </td>
+                            </tr>
+                            <!-- Body -->
+                            <tr>
+                                <td style="padding: 40px;">
+                                    <h2 style="margin: 0 0 16px; color: #111827; font-size: 20px; font-weight: 600;">Hi {user.full_name},</h2>
+                                    <p style="margin: 0 0 24px; color: #6b7280; font-size: 15px; line-height: 1.6;">
+                                        We received a request to reset your password. Click the button below to create a new password:
+                                    </p>
+                                    <!-- Reset Button -->
+                                    <table width="100%" cellpadding="0" cellspacing="0">
+                                        <tr>
+                                            <td align="center" style="padding: 24px 0;">
+                                                <a href="{reset_url}" style="display: inline-block; background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: #ffffff; text-decoration: none; padding: 14px 32px; border-radius: 10px; font-size: 15px; font-weight: 600; box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);">
+                                                    Reset My Password
+                                                </a>
+                                            </td>
+                                        </tr>
+                                    </table>
+                                    <p style="margin: 24px 0 0; color: #6b7280; font-size: 14px; line-height: 1.6;">
+                                        Or copy and paste this link into your browser:
+                                    </p>
+                                    <p style="margin: 8px 0 0; padding: 12px; background-color: #f3f4f6; border-radius: 8px; word-break: break-all; font-size: 12px; color: #4b5563; font-family: 'Courier New', monospace;">
+                                        {reset_url}
+                                    </p>
+                                    <p style="margin: 24px 0 0; color: #6b7280; font-size: 14px; line-height: 1.6;">
+                                        This link will expire in <strong style="color: #111827;">24 hours</strong>.
+                                    </p>
+                                    <div style="margin-top: 24px; padding: 16px; background-color: #fef3c7; border-left: 4px solid #f59e0b; border-radius: 8px;">
+                                        <p style="margin: 0; color: #92400e; font-size: 13px; line-height: 1.5;">
+                                            <strong>Security Notice:</strong> If you didn't request this password reset, please ignore this email. Your account is safe and no changes have been made.
+                                        </p>
+                                    </div>
+                                </td>
+                            </tr>
+                            <!-- Footer -->
+                            <tr>
+                                <td style="background-color: #f9fafb; padding: 24px 40px; border-top: 1px solid #e5e7eb;">
+                                    <p style="margin: 0; color: #9ca3af; font-size: 12px; text-align: center; line-height: 1.5;">
+                                        © 2024 Hostel Nepal. All rights reserved.<br>
+                                        This is an automated message, please do not reply.
+                                    </p>
+                                </td>
+                            </tr>
+                        </table>
+                    </td>
+                </tr>
+            </table>
+        </body>
+        </html>
+        """
+
+        plain_message = (
+            f"Hi {user.full_name},\n\n"
+            f"Click the link below to reset your password:\n"
+            f"{reset_url}\n\n"
+            f"This link expires in 24 hours.\n\n"
+            f"If you did not request this, please ignore this email."
         )
+
+        try:
+            send_mail(
+                subject="Reset Your Hostel Nepal Password",
+                message=plain_message,
+                from_email=django_settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[user.email],
+                fail_silently=False,
+                html_message=html_message,
+            )
+        except Exception as e:
+            # Log the error but still return success to prevent email enumeration
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Failed to send password reset email to {user.email}: {str(e)}")
 
         return api_response(None, message=success_msg)
 

@@ -207,6 +207,15 @@ export interface RegisterFormData {
   avatar?: File | null;
 }
 
+export interface EmailVerificationRequestData {
+  email: string;
+}
+
+export interface EmailVerificationConfirmData {
+  email: string;
+  otp: string;
+}
+
 export interface HostelFormData {
   name: string;
   description: string;
